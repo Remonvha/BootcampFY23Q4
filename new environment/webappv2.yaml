@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp-deployment
+  labels:
+    app: webapp
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+    spec:
+      containers:
+      - name: webapp
+        image: bootcampdevregistry.azurecr.io/azure-vote-front:v1
+        ports:
+        - containerPort: 3000
+        env:
+        - name: USER_NAME
+          valueFrom:
+            secretKeyRef:
+              name: mongo-secret
+              key: mongo-user
+        - name: USER_PWD
+          valueFrom:
+            secretKeyRef:
+              name: mongo-secret
+              key: mongo-password 
+        - name: DB_URL
+          valueFrom:
+            configMapKeyRef:
+              name: mongo-config
+              key: mongo-url
+        # A readiness probe checks whether the container is ready to serve 
+        # traffic. It is used by the Kubernetes service to determine when the container 
+        # is ready to start receiving traffic. If a container fails its readiness probe, 
+        # it is removed from the service endpoint and traffic is not sent 
+        # to it until it passes the probe.
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        # A liveness probe checks whether the container is still running and serving 
+        # traffic. It is used to determine if a container is healthy and should continue 
+        # to run. If a container fails its liveness probe, Kubernetes will restart the 
+        # container, replacing it with a new one.
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 3000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        # create resource requests and limits 
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+      # rollingupdates  are a deployment strategy used to update an application
+      # to a new version in a controlled manner with minimal disruption to the service. 
+      # A rolling update starts by creating a new replica set with the updated 
+      # version of the application and then incrementally scaling up the new 
+      # replica set while scaling down the old replica set. This gradual process 
+      # ensures that the application remains available during the update
+      strategy:
+        type: RollingUpdate
+        rollingUpdate:
+          maxSurge: 1
+          maxUnavailable: 1
+      # Add Pod Disruption Budget
+      # Ensure at least one pod is available during updates or failures
+      # Gracefully handle failures without downtime
+      # Allow a max of 25% of the replicas to be unavailable
+      # Allow for 1 unavailable pod during planned maintenance
+      # Refuse deletion of any running pod, except during cluster scaling
+      # Allow disruptions for a max of 10 minutes
+      # Minimize the number of pods that need to be disrupted
+      # Only evict pods if it does not violate the PDB
+      # Set a default update budget of 1
+      # Specify that the PDB targets the label "app: webapp"
+      podDisruptionBudget:
+        metadata:
+          name: webapp-pdb
+        spec:
+          selector:
+            matchLabels:
+              app: webapp
+          maxUnavailable: 25%
+          minAvailable: 1
+          disruptionsAllowed: 1
+          evictionBudget:
+            maxPodGracefulTerminations: 1
+            minAvailablePercentage: 100
+            podTerminationGracePeriodSeconds: 600
+            selector:
+              matchLabels:
+                app: webapp
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: webapp
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000
+  externalTrafficPolicy: Local
+  sessionAffinity: ClientIP
